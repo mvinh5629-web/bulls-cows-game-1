@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bulls & Cows Online</title>
+<style>
+body{font-family:Arial,sans-serif;background:linear-gradient(135deg,#101827,#243b70);color:#fff;margin:0;min-height:100vh}
+main{max-width:900px;margin:auto;padding:25px}
+.card{background:#172033eF;border-radius:20px;padding:22px;margin:15px 0;box-shadow:0 10px 35px #0005}
+h1{text-align:center;font-size:42px}.sub{text-align:center;color:#cbd5e1}
+button,input{padding:12px 15px;border-radius:10px;border:0;font-size:16px;margin:4px}
+button{background:#6366f1;color:white;font-weight:bold;cursor:pointer}button:disabled{opacity:.45}
+input{background:#263449;color:white}.room{font-size:32px;font-weight:bold;letter-spacing:7px;color:#a5b4fc}
+.status{background:#263449;padding:12px;border-radius:10px;margin:10px 0}.ok{background:#065f46}
+.players{display:flex;gap:10px}.player{flex:1;background:#111827;padding:14px;border-radius:12px}
+.guess{font-size:24px;text-align:center;width:170px;letter-spacing:7px}
+.pill{display:inline-block;padding:9px 12px;border-radius:20px;background:#263449;margin:4px}.bull{background:#065f46}.cow{background:#854d0e}
+.winner{font-size:26px;background:#3730a3;padding:15px;border-radius:12px;text-align:center}
+.attempt{padding:10px;border-bottom:1px solid #334155}.code{font-size:20px;letter-spacing:5px;font-weight:bold}
+.small{color:#94a3b8;font-size:14px}.hidden{display:none}
+@media(max-width:650px){.players{flex-direction:column}}
+</style>
+</head>
+<body>
+<main>
+<h1>🐂 Bulls & Cows 🐄</h1>
+<p class="sub">Hai người cùng đoán một mật mã 4 số được máy tạo ngẫu nhiên</p>
+
+<div class="card">
+<h2>🌐 Phòng chơi</h2>
+<div id="setup">
+<button id="create">🎮 Tạo phòng</button>
+<input id="roomInput" maxlength="6" placeholder="Mã phòng">
+<button id="join">🚪 Tham gia</button>
+</div>
+
+<div id="roomPanel" class="hidden">
+<div class="small">MÃ PHÒNG</div>
+<div id="room" class="room"></div>
+<div id="status" class="status">Đang kết nối...</div>
+
+<div class="players">
+<div class="player">👤 Người chơi 1<div id="p1" class="small">Đang chờ</div></div>
+<div class="player">👤 Người chơi 2<div id="p2" class="small">Chưa kết nối</div></div>
+</div>
+
+<div id="readyArea">
+<p>🎲 Khi cả hai cùng sẵn sàng, máy sẽ tự tạo <b>một mật mã bí mật</b>. Không ai nhìn thấy mật mã.</p>
+<button id="ready">✅ Sẵn sàng</button>
+<div id="readyText" class="status">Chưa sẵn sàng</div>
+</div>
+
+<div id="game" class="hidden">
+<div id="winner" class="winner hidden"></div>
+<div id="turn" class="status"></div>
+<input id="guess" class="guess" maxlength="4" inputmode="numeric" placeholder="1234">
+<button id="guessBtn">🎯 Đoán</button>
+<div>
+<span class="pill bull">🎯 Bulls: <b id="bulls">0</b></span>
+<span class="pill cow">🐄 Cows: <b id="cows">0</b></span>
+</div>
+<p class="small">Bulls = đúng số + đúng vị trí. Cows = đúng số nhưng sai vị trí.</p>
+</div>
+</div>
+</div>
+
+<div class="card">
+<h2>📜 Lịch sử</h2>
+<div id="history" class="small">Chưa có lượt đoán.</div>
+</div>
+
+<div class="card">
+<h2>📖 Luật</h2>
+<ul>
+<li>Máy tạo ngẫu nhiên 4 chữ số khác nhau.</li>
+<li>Cả hai người cùng đoán một mã.</li>
+<li>Mật mã không được hiển thị cho người chơi.</li>
+<li>Hai người lần lượt đoán.</li>
+<li>Đạt 4 Bulls trước sẽ thắng.</li>
+</ul>
+</div>
+</main>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+let peer,conn,isHost=false,roomCode="",secret="",ready=false,otherReady=false,started=false,turn=false,ended=false,n=0;
+
+const $=id=>document.getElementById(id);
+function send(x){if(conn&&conn.open)conn.send(x)}
+function valid(g){return /^\d{4}$/.test(g)&&new Set(g).size===4}
+function makeSecret(){
+ let a=["0","1","2","3","4","5","6","7","8","9"];
+ for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}
+ return a.slice(0,4).join("");
+}
+function score(g){
+ let b=0,c=0;
+ for(let i=0;i<4;i++)if(g[i]===secret[i])b++;
+ for(let d of g)if(secret.includes(d))c++;
+ return {bulls:b,cows:c-b};
+}
+function showRoom(){
+ $("setup").classList.add("hidden");$("roomPanel").classList.remove("hidden");$("room").textContent=roomCode;
+}
+function hist(w,g,r){
+ if(n===0)$("history").innerHTML="";
+ n++;
+ let d=document.createElement("div");d.className="attempt";
+ d.innerHTML="#"+n+" — <b>"+w+"</b> — <span class='code'>"+g+"</span>　🎯 "+r.bulls+" Bulls　🐄 "+r.cows+" Cows";
+ $("history").prepend(d);
+}
+function update(){
+ $("p1").textContent=(isHost?ready:otherReady)?"✅ Sẵn sàng":"⏳ Chưa sẵn sàng";
+ $("p2").textContent=(isHost?otherReady:ready)?"✅ Sẵn sàng":"⏳ Chưa sẵn sàng";
+}
+function start(){
+ if(!isHost||!ready||!otherReady||started)return;
+ secret=makeSecret();
+ started=true;turn=true;
+ $("readyArea").classList.add("hidden");$("game").classList.remove("hidden");
+ $("turn").textContent="🟢 Đến lượt Người chơi 1.";
+ $("guessBtn").disabled=false;
+ send({type:"START"});
+}
+function finish(win){
+ ended=true;$("guessBtn").disabled=true;$("winner").classList.remove("hidden");
+ $("winner").textContent=win?"🏆 Bạn thắng!":"😄 Đối thủ thắng!";
+ $("turn").textContent="Ván đấu kết thúc.";
+}
+function connect(c){
+ conn=c;
+ c.on("open",()=>{
+   $("status").textContent="🟢 Đã kết nối";
+   $("status").className="status ok";
+   $("p2").textContent="🟢 Đã kết nối";
+   send({type:"SYNC",ready:ready});
+ });
+ c.on("data",m=>{
+   if(m.type==="SYNC"){otherReady=!!m.ready;update();if(isHost)start()}
+   if(m.type==="READY"){otherReady=true;update();if(isHost)start()}
+   if(m.type==="START"){
+     started=true;turn=false;
+     $("readyArea").classList.add("hidden");$("game").classList.remove("hidden");
+     $("turn").textContent="🟡 Đợi Người chơi 1 đoán...";
+     $("guessBtn").disabled=true;
+   }
+   if(m.type==="GUESS"&&isHost){
+     let r=score(m.guess);hist("Người chơi 2",m.guess,r);
+     send({type:"RESULT",guess:m.guess,bulls:r.bulls,cows:r.cows});
+     if(r.bulls===4){send({type:"WIN",player:2});finish(false)}
+     else{$("turn").textContent="🟢 Đến lượt Người chơi 1.";turn=true;$("guessBtn").disabled=false}
+   }
+   if(m.type==="RESULT"&&!isHost){
+     hist("Bạn",m.guess,{bulls:m.bulls,cows:m.cows});
+     $("bulls").textContent=m.bulls;$("cows").textContent=m.cows;
+     if(m.bulls===4){finish(true)}
+     else{$("turn").textContent="🟢 Đến lượt bạn.";turn=true;$("guessBtn").disabled=false}
+   }
+   if(m.type==="WIN"){finish(m.player===2&&!isHost)}
+ });
+ c.on("close",()=>{$("status").textContent="Đối thủ đã rời phòng";$("status").className="status warn"});
+}
+$("create").onclick=()=>{
+ isHost=true;roomCode=Math.random().toString(36).slice(2,8).toUpperCase();
+ peer=new Peer("bullscows-"+roomCode);
+ peer.on("open",()=>{showRoom();$("status").textContent="⏳ Đang chờ Người chơi 2..."});
+ peer.on("connection",c=>connect(c));
+ peer.on("error",()=>{$("status").textContent="Không tạo được phòng";});
+};
+$("join").onclick=()=>{
+ roomCode=$("roomInput").value.trim().toUpperCase();
+ if(!/^[A-Z0-9]{6}$/.test(roomCode)){alert("Nhập đúng mã phòng 6 ký tự.");return}
+ isHost=false;peer=new Peer();
+ peer.on("open",()=>{showRoom();$("status").textContent="⏳ Đang kết nối...";connect(peer.connect("bullscows-"+roomCode));});
+ peer.on("error",()=>{$("status").textContent="Không tìm thấy phòng.";});
+};
+$("ready").onclick=()=>{
+ if(!conn||!conn.open){alert("Chưa có đối thủ.");return}
+ ready=true;$("ready").disabled=true;$("readyText").textContent="✅ Bạn đã sẵn sàng";
+ update();send({type:"READY"});if(isHost)start();
+};
+$("guessBtn").onclick=()=>{
+ if(!started||ended||!turn)return;
+ let g=$("guess").value.trim();
+ if(!valid(g)){alert("Hãy nhập 4 chữ số khác nhau.");return}
+ $("guess").value="";$("guessBtn").disabled=true;
+ if(isHost){
+   let r=score(g);hist("Bạn",g,r);$("bulls").textContent=r.bulls;$("cows").textContent=r.cows;
+   send({type:"RESULT",guess:g,bulls:r.bulls,cows:r.cows});
+   if(r.bulls===4){send({type:"WIN",player:1});finish(true)}
+   else{$("turn").textContent="🟡 Đợi Người chơi 2 đoán...";turn=false}
+ }else{
+   send({type:"GUESS",guess:g});$("turn").textContent="🟡 Đang chờ kết quả...";
+ }
+};
+$("guess").addEventListener("keydown",e=>{if(e.key==="Enter")$("guessBtn").click()});
+</script>
+</body>
+</html>
